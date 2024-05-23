@@ -933,8 +933,8 @@ class MotionCorrection(dj.Imported):
                         **motion_correction_key,
                         "ref_image": s2p.ref_image,
                         "average_image": s2p.mean_image,
-                        "correlation_image": s2p.correlation_map,
-                        "max_proj_image": s2p.max_proj_image,
+                        "correlation_image": s2p.correlation_map if s2p.correlation_map else None,
+                        "max_proj_image": s2p.max_proj_image if s2p.max_proj_image else None,
                     }
                 )
 
