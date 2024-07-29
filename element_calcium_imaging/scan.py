@@ -150,18 +150,6 @@ def get_prairieview_files(scan_key: dict) -> list:
     """
     return _linking_module.get_prairieview_files(scan_key)
 
-def get_zstack_files(scan_key: dict) -> list:
-    """Retrieve the list of zstack files associated with a given Scan.
-
-    Args:
-        scan_key: Primary key of a Scan entry.
-
-    Returns:
-        A list of zstack files' full file-paths.
-    """
-
-    return _linking_module.get_zstack_files(scan_key)
-
 
 # ----------------------------- Table declarations ----------------------
 
@@ -384,17 +372,21 @@ class ScanInfo(dj.Imported):
                             px_width=scan.field_widths[field_id],
                             um_height=scan.field_heights_in_microns[field_id],
                             um_width=scan.field_widths_in_microns[field_id],
-                            field_x=x_zero
-                            + scan._degrees_to_microns(scan.fields[field_id].x)
-                            if x_zero
-                            else None,
-                            field_y=y_zero
-                            + scan._degrees_to_microns(scan.fields[field_id].y)
-                            if y_zero
-                            else None,
-                            field_z=z_zero + scan.fields[field_id].depth
-                            if z_zero
-                            else None,
+                            field_x=(
+                                x_zero
+                                + scan._degrees_to_microns(scan.fields[field_id].x)
+                                if x_zero
+                                else None
+                            ),
+                            field_y=(
+                                y_zero
+                                + scan._degrees_to_microns(scan.fields[field_id].y)
+                                if y_zero
+                                else None
+                            ),
+                            field_z=(
+                                z_zero + scan.fields[field_id].depth if z_zero else None
+                            ),
                             delay_image=scan.field_offsets[field_id],
                             roi=scan.field_rois[field_id][0],
                         )
@@ -413,9 +405,11 @@ class ScanInfo(dj.Imported):
                             um_width=getattr(scan, "image_width_in_microns", None),
                             field_x=x_zero if x_zero else None,
                             field_y=y_zero if y_zero else None,
-                            field_z=z_zero + scan.scanning_depths[plane_idx]
-                            if z_zero
-                            else None,
+                            field_z=(
+                                z_zero + scan.scanning_depths[plane_idx]
+                                if z_zero
+                                else None
+                            ),
                             delay_image=scan.field_offsets[plane_idx],
                         )
                         for plane_idx in range(scan.num_scanning_depths)
@@ -442,9 +436,11 @@ class ScanInfo(dj.Imported):
             self.insert1(
                 dict(
                     key,
-                    nfields=sbx_meta["num_fields"]
-                    if is_multiROI
-                    else sbx_meta["num_planes"],
+                    nfields=(
+                        sbx_meta["num_fields"]
+                        if is_multiROI
+                        else sbx_meta["num_planes"]
+                    ),
                     nchannels=sbx_meta["num_channels"],
                     nframes=sbx_meta["num_frames"],
                     ndepths=sbx_meta["num_planes"],
@@ -467,12 +463,16 @@ class ScanInfo(dj.Imported):
                             field_idx=plane_idx,
                             px_height=px_height,
                             px_width=px_width,
-                            um_height=px_height * sbx_meta["um_per_pixel_y"]
-                            if sbx_meta["um_per_pixel_y"]
-                            else None,
-                            um_width=px_width * sbx_meta["um_per_pixel_x"]
-                            if sbx_meta["um_per_pixel_x"]
-                            else None,
+                            um_height=(
+                                px_height * sbx_meta["um_per_pixel_y"]
+                                if sbx_meta["um_per_pixel_y"]
+                                else None
+                            ),
+                            um_width=(
+                                px_width * sbx_meta["um_per_pixel_x"]
+                                if sbx_meta["um_per_pixel_x"]
+                                else None
+                            ),
                             field_x=x_zero,
                             field_y=y_zero,
                             field_z=z_zero + sbx_meta["etl_pos"][plane_idx],
@@ -518,9 +518,11 @@ class ScanInfo(dj.Imported):
                 scan_datetime = nd2_file.text_info["date"]
                 scan_datetime = datetime.strptime(
                     scan_datetime,
-                    "%m/%d/%Y %H:%M:%S %p"
-                    if re.search(("AM|PM"), scan_datetime)
-                    else "%m/%d/%Y %H:%M:%S",
+                    (
+                        "%m/%d/%Y %H:%M:%S %p"
+                        if re.search(("AM|PM"), scan_datetime)
+                        else "%m/%d/%Y %H:%M:%S"
+                    ),
                 )
                 scan_datetime = datetime.strftime(scan_datetime, "%Y-%m-%d %H:%M:%S")
             except:  # noqa: E722
@@ -606,9 +608,11 @@ class ScanInfo(dj.Imported):
                     um_width=PVScan_info["width_in_um"],
                     field_x=PVScan_info["fieldX"],
                     field_y=PVScan_info["fieldY"],
-                    field_z=PVScan_info["fieldZ"]
-                    if PVScan_info["num_planes"] == 1
-                    else PVScan_info["fieldZ"][plane_idx],
+                    field_z=(
+                        PVScan_info["fieldZ"]
+                        if PVScan_info["num_planes"] == 1
+                        else PVScan_info["fieldZ"][plane_idx]
+                    ),
                 )
                 for plane_idx in range(PVScan_info["num_planes"])
             )

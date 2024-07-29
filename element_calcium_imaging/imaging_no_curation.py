@@ -15,7 +15,6 @@ from .scan import (
     get_processed_root_data_dir,
     get_scan_box_files,
     get_scan_image_files,
-    get_zstack_files,
 )
 
 
@@ -359,6 +358,8 @@ class ZDriftMetrics(dj.Computed):
     """
 
     def make(self, key):
+        import nd2
+
         def _make_taper(size, width):
             m = np.ones(size - width + 1)
             k = np.hanning(width)
@@ -372,12 +373,24 @@ class ZDriftMetrics(dj.Computed):
             for image_file in image_files
         ]
 
-        zstack_files = get_zstack_files(key)
+        try:
+            movie_file = next(
+                file for file in image_files if not file.name.endswith("_Z.nd2")
+            )
+        except StopIteration:
+            raise FileNotFoundError(
+                f"No calcium imaging movie file found in {image_files}"
+            )
 
-        import nd2
+        try:
+            z_stack_file = next(
+                file for file in image_files if file.name.endswith("_Z.nd2")
+            )
+        except StopIteration:
+            raise FileNotFoundError(f"No z-stack file found in {image_files}")
 
-        ca_imaging_movie = nd2.imread(image_files[0])
-        zstack = nd2.imread(zstack_files[0])
+        ca_imaging_movie = nd2.imread(movie_file)
+        zstack = nd2.imread(z_stack_file)
 
         if not all(
             parameter in drift_params
@@ -835,7 +848,7 @@ class MotionCorrection(dj.Imported):
                         f"Unable to load/ingest non-rigid motion correction for plane {plane}."
                         "Non-rigid motion correction data is not saved by Suite2p for versions above 0.10.*."
                     )
-                else: 
+                else:
                     # -- rigid motion correction --
                     if idx == 0:
                         rigid_correction = {
@@ -933,8 +946,12 @@ class MotionCorrection(dj.Imported):
                         **motion_correction_key,
                         "ref_image": s2p.ref_image,
                         "average_image": s2p.mean_image,
-                        "correlation_image": s2p.correlation_map if s2p.correlation_map else None,
-                        "max_proj_image": s2p.max_proj_image if s2p.max_proj_image else None,
+                        "correlation_image": (
+                            s2p.correlation_map if s2p.correlation_map else None
+                        ),
+                        "max_proj_image": (
+                            s2p.max_proj_image if s2p.max_proj_image else None
+                        ),
                     }
                 )
 
@@ -1112,30 +1129,40 @@ class MotionCorrection(dj.Imported):
                 }
                 for fkey, ref_image, ave_img, corr_img, max_img in zip(
                     field_keys,
-                    caiman_dataset.motion_correction["reference_image"].transpose(
-                        2, 0, 1
-                    )
-                    if is3D
-                    else caiman_dataset.motion_correction["reference_image"][...][
-                        np.newaxis, ...
-                    ],
-                    caiman_dataset.motion_correction["average_image"].transpose(2, 0, 1)
-                    if is3D
-                    else caiman_dataset.motion_correction["average_image"][...][
-                        np.newaxis, ...
-                    ],
-                    caiman_dataset.motion_correction["correlation_image"].transpose(
-                        2, 0, 1
-                    )
-                    if is3D
-                    else caiman_dataset.motion_correction["correlation_image"][...][
-                        np.newaxis, ...
-                    ],
-                    caiman_dataset.motion_correction["max_image"].transpose(2, 0, 1)
-                    if is3D
-                    else caiman_dataset.motion_correction["max_image"][...][
-                        np.newaxis, ...
-                    ],
+                    (
+                        caiman_dataset.motion_correction["reference_image"].transpose(
+                            2, 0, 1
+                        )
+                        if is3D
+                        else caiman_dataset.motion_correction["reference_image"][...][
+                            np.newaxis, ...
+                        ]
+                    ),
+                    (
+                        caiman_dataset.motion_correction["average_image"].transpose(
+                            2, 0, 1
+                        )
+                        if is3D
+                        else caiman_dataset.motion_correction["average_image"][...][
+                            np.newaxis, ...
+                        ]
+                    ),
+                    (
+                        caiman_dataset.motion_correction["correlation_image"].transpose(
+                            2, 0, 1
+                        )
+                        if is3D
+                        else caiman_dataset.motion_correction["correlation_image"][...][
+                            np.newaxis, ...
+                        ]
+                    ),
+                    (
+                        caiman_dataset.motion_correction["max_image"].transpose(2, 0, 1)
+                        if is3D
+                        else caiman_dataset.motion_correction["max_image"][...][
+                            np.newaxis, ...
+                        ]
+                    ),
                 )
             ]
             self.Summary.insert(summary_images)
