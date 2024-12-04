@@ -676,7 +676,7 @@ class Processing(dj.Computed):
                     "file_name": f.relative_to(output_dir).as_posix(),
                     "file": f,
                 }
-                for f in output_dir.rglob("*")
+                for f in pathlib.Path(output_dir).rglob("*")
                 if f.is_file()
             ]
         )
