@@ -678,7 +678,7 @@ class Processing(dj.Computed):
                 }
                 for f in pathlib.Path(output_dir).rglob("*")
                 if f.is_file()
-            ]
+            ], ignore_extra_fields=True
         )
 
 
