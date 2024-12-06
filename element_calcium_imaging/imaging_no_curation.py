@@ -433,7 +433,7 @@ class ZDriftMetrics(dj.Computed):
             "slice_interval"
         ]
 
-        bad_frames_idx = np.where(drift >= drift_params["bad_frames_threshold"])[0]
+        bad_frames_idx = np.where(np.abs(drift) >= drift_params["bad_frames_threshold"])[0]
 
         self.insert1(
             dict(**key, bad_frames=bad_frames_idx, z_drift=drift),
