@@ -298,6 +298,8 @@ class ZDriftMetrics(dj.Computed):
         ProcessingTask (foreign key): Primary key from ProcessingTask.
         ZDriftParamSet (foreign key): Primary key from ZDriftParamSet.
         z_drift (longblob): Amount of drift in microns per frame in Z direction.
+        bad_frames_threshold (float): Drift threshold in microns where frames are deemed as bad frames.
+        percent_bad_frames (float): Percentage of frames with z-drift exceeding the threshold.
     """
 
     definition = """
@@ -305,13 +307,15 @@ class ZDriftMetrics(dj.Computed):
     ---
     bad_frames=NULL: longblob  # `True` if any value in z_drift > threshold from drift_params.
     z_drift: longblob   # Amount of drift in microns per frame in Z direction.
+    bad_frames_threshold: float  # Drift threshold in microns where frames are deemed as bad frames.
+    percent_bad_frames: float  # Percentage of frames with z-drift exceeding the threshold.
     """
 
     _default_params = {
         "pad_length": 5,
         "slice_interval": 1,
         "num_scans": 5,
-        "bad_frames_threshold": 3
+        "bad_frames_threshold": 3,
     }
 
     def make(self, key):
@@ -323,9 +327,7 @@ class ZDriftMetrics(dj.Computed):
             return np.convolve(m, k, mode="full") / k.sum()
 
         nchannels = (scan.ScanInfo & key).fetch1("nchannels")
-        params = (ProcessingTask * ProcessingParamSet & key).fetch1(
-            "params"
-        )
+        params = (ProcessingTask * ProcessingParamSet & key).fetch1("params")
         drift_params = params.get("ZDRIFT_PARAMS", self._default_params)
 
         # use the same channel specified in ProcessingParamSet for this task
@@ -433,10 +435,18 @@ class ZDriftMetrics(dj.Computed):
             "slice_interval"
         ]
 
-        bad_frames_idx = np.where(np.abs(drift) >= drift_params["bad_frames_threshold"])[0]
+        bad_frames_idx = np.where(
+            np.abs(drift) >= drift_params["bad_frames_threshold"]
+        )[0]
 
         self.insert1(
-            dict(**key, bad_frames=bad_frames_idx, z_drift=drift),
+            dict(
+                **key,
+                z_drift=drift,
+                bad_frames=bad_frames_idx,
+                bad_frames_threshold=drift_params["bad_frames_threshold"],
+                percent_bad_frames=len(bad_frames_idx) / len(drift) * 100,
+            ),
         )
 
 
@@ -550,9 +560,7 @@ class Processing(dj.Computed):
                 "processing_method"
             )
 
-            params = (ProcessingTask * ProcessingParamSet & key).fetch1(
-                    "params"
-                )
+            params = (ProcessingTask * ProcessingParamSet & key).fetch1("params")
             params.pop("ZDRIFT_PARAMS", None)
 
             if method == "suite2p":
@@ -678,7 +686,8 @@ class Processing(dj.Computed):
                 }
                 for f in pathlib.Path(output_dir).rglob("*")
                 if f.is_file()
-            ], ignore_extra_fields=True
+            ],
+            ignore_extra_fields=True,
         )
 
 
