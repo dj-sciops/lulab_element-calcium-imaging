@@ -1618,7 +1618,7 @@ class Activity(dj.Computed):
         )
 
         reg_img_dir = output_dir / "suite2p/plane0/reg_tif"
-        fissa_output_dir = output_dir / "FISSA_Suite2p"
+        fissa_output_dir = output_dir / "FISSA_Suite2P"
 
         # Required even though the FISSA is not triggered
         cell_ids, mask_xpixs, mask_ypixs = (
