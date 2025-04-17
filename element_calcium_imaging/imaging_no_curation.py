@@ -530,7 +530,7 @@ class Processing(dj.Computed):
                     "To use EXTRACT with this DataJoint Element please set `task_mode=trigger`"
                 )
             else:
-                raise NotImplementedError("Unknown method: {}".format(method))
+                raise NotImplementedError("Unknown/unimplemented method: {}".format(method))
         elif task_mode == "trigger":
             drop_frames = (ZDriftMetrics & key).fetch1("bad_frames")
             if drop_frames.size > 0:
@@ -586,109 +586,26 @@ class Processing(dj.Computed):
                 _, imaging_dataset = get_loader_result(key, ProcessingTask)
                 suite2p_dataset = imaging_dataset
                 key = {**key, "processing_time": suite2p_dataset.creation_time}
-
-            elif method == "caiman":
-                from element_interface.caiman_loader import _process_scanimage_tiff
-                from element_interface.run_caiman import run_caiman
-
-                caiman_params = params
-                sampling_rate, ndepths, nchannels = (scan.ScanInfo & key).fetch1(
-                    "fps", "ndepths", "nchannels"
-                )
-
-                is3D = bool(ndepths > 1)
-                if is3D:
-                    raise NotImplementedError(
-                        "Caiman pipeline is not yet capable of analyzing 3D scans."
-                    )
-
-                # handle multi-channel tiff image before running CaImAn
-                if nchannels > 1:
-                    channel_idx = caiman_params.get("channel_to_process", 0)
-                    tmp_dir = pathlib.Path(output_dir) / "channel_separated_tif"
-                    tmp_dir.mkdir(exist_ok=True)
-                    _process_scanimage_tiff(
-                        [f.as_posix() for f in image_files], output_dir=tmp_dir
-                    )
-                    image_files = tmp_dir.glob(f"*_chn{channel_idx}.tif")
-
-                run_caiman(
-                    file_paths=[f.as_posix() for f in image_files],
-                    parameters=caiman_params,
-                    sampling_rate=sampling_rate,
-                    output_dir=output_dir,
-                    is3D=is3D,
-                )
-
-                _, imaging_dataset = get_loader_result(key, ProcessingTask)
-                caiman_dataset = imaging_dataset
-                key["processing_time"] = caiman_dataset.creation_time
-
-            elif method == "extract":
-                import suite2p
-                from element_interface.extract_trigger import EXTRACT_trigger
-                from scipy.io import savemat
-
-                # Motion Correction with Suite2p
-                params["suite2p"]["save_path0"] = output_dir
-                (
-                    params["suite2p"]["fs"],
-                    params["suite2p"]["nplanes"],
-                    params["suite2p"]["nchannels"],
-                ) = (scan.ScanInfo & key).fetch1("fps", "ndepths", "nchannels")
-
-                input_format = pathlib.Path(image_files[0]).suffix
-                params["suite2p"]["input_format"] = input_format[1:]
-
-                suite2p_paths = {
-                    "data_path": [image_files[0].parent.as_posix()],
-                    "tiff_list": [f.as_posix() for f in image_files],
-                }
-
-                suite2p.run_s2p(ops=params["suite2p"], db=suite2p_paths)
-
-                # Convert data.bin to registered_scans.mat
-                scanfile_fullpath = pathlib.Path(output_dir) / "suite2p/plane0/data.bin"
-
-                data_shape = (scan.ScanInfo * scan.ScanInfo.Field & key).fetch1(
-                    "nframes", "px_height", "px_width"
-                )
-                data = np.memmap(scanfile_fullpath, shape=data_shape, dtype=np.int16)
-
-                scan_matlab_fullpath = scanfile_fullpath.parent / "registered_scan.mat"
-
-                # Save the motion corrected movie (data.bin) in a .mat file
-                savemat(
-                    scan_matlab_fullpath,
-                    {"M": np.transpose(data, axes=[1, 2, 0])},
-                )
-
-                # Execute EXTRACT
-
-                ex = EXTRACT_trigger(
-                    scan_matlab_fullpath, params["extract"], output_dir
-                )
-                ex.run()
-
-                _, extract_dataset = get_loader_result(key, ProcessingTask)
-                key["processing_time"] = extract_dataset.creation_time
-
+            else:
+                raise NotImplementedError(f"Unknown method: {method}")
         else:
             raise ValueError(f"Unknown task mode: {task_mode}")
 
         self.insert1(key)
-        self.File.insert(
-            [
-                {
-                    **key,
-                    "file_name": f.relative_to(output_dir).as_posix(),
-                    "file": f,
-                }
-                for f in pathlib.Path(output_dir).rglob("*")
-                if f.is_file()
-            ],
-            ignore_extra_fields=True,
-        )
+
+        if task_mode == "trigger":
+            self.File.insert(
+                [
+                    {
+                        **key,
+                        "file_name": f.relative_to(output_dir).as_posix(),
+                        "file": f,
+                    }
+                    for f in pathlib.Path(output_dir).rglob("*")
+                    if f.is_file()
+                ],
+                ignore_extra_fields=True,
+            )
 
 
 # -------------- Motion Correction --------------
@@ -956,210 +873,6 @@ class MotionCorrection(dj.Imported):
                 self.NonRigidMotionCorrection.insert1(nonrigid_correction)
                 self.Block.insert(nonrigid_blocks.values())
             self.Summary.insert(summary_images)
-        elif method == "caiman":
-            caiman_dataset = imaging_dataset
-
-            self.insert1(
-                {
-                    **key,
-                    "motion_correct_channel": caiman_dataset.alignment_channel,
-                }
-            )
-
-            is3D = caiman_dataset.params.motion["is3D"]
-            if not caiman_dataset.params.motion["pw_rigid"]:
-                # -- rigid motion correction --
-                rigid_correction = {
-                    **key,
-                    "x_shifts": caiman_dataset.motion_correction["shifts_rig"][:, 0],
-                    "y_shifts": caiman_dataset.motion_correction["shifts_rig"][:, 1],
-                    "z_shifts": (
-                        caiman_dataset.motion_correction["shifts_rig"][:, 2]
-                        if is3D
-                        else np.full_like(
-                            caiman_dataset.motion_correction["shifts_rig"][:, 0],
-                            0,
-                        )
-                    ),
-                    "x_std": np.nanstd(
-                        caiman_dataset.motion_correction["shifts_rig"][:, 0]
-                    ),
-                    "y_std": np.nanstd(
-                        caiman_dataset.motion_correction["shifts_rig"][:, 1]
-                    ),
-                    "z_std": (
-                        np.nanstd(caiman_dataset.motion_correction["shifts_rig"][:, 2])
-                        if is3D
-                        else np.nan
-                    ),
-                    "outlier_frames": None,
-                }
-
-                self.RigidMotionCorrection.insert1(rigid_correction)
-            else:
-                # -- non-rigid motion correction --
-                nonrigid_correction = {
-                    **key,
-                    "block_height": (
-                        caiman_dataset.params.motion["strides"][0]
-                        + caiman_dataset.params.motion["overlaps"][0]
-                    ),
-                    "block_width": (
-                        caiman_dataset.params.motion["strides"][1]
-                        + caiman_dataset.params.motion["overlaps"][1]
-                    ),
-                    "block_depth": (
-                        caiman_dataset.params.motion["strides"][2]
-                        + caiman_dataset.params.motion["overlaps"][2]
-                        if is3D
-                        else 1
-                    ),
-                    "block_count_x": len(
-                        set(caiman_dataset.motion_correction["coord_shifts_els"][:, 0])
-                    ),
-                    "block_count_y": len(
-                        set(caiman_dataset.motion_correction["coord_shifts_els"][:, 2])
-                    ),
-                    "block_count_z": (
-                        len(
-                            set(
-                                caiman_dataset.motion_correction["coord_shifts_els"][
-                                    :, 4
-                                ]
-                            )
-                        )
-                        if is3D
-                        else 1
-                    ),
-                    "outlier_frames": None,
-                }
-
-                nonrigid_blocks = []
-                for b_id in range(
-                    len(caiman_dataset.motion_correction["x_shifts_els"][0, :])
-                ):
-                    nonrigid_blocks.append(
-                        {
-                            **key,
-                            "block_id": b_id,
-                            "block_x": np.arange(
-                                *caiman_dataset.motion_correction["coord_shifts_els"][
-                                    b_id, 0:2
-                                ]
-                            ),
-                            "block_y": np.arange(
-                                *caiman_dataset.motion_correction["coord_shifts_els"][
-                                    b_id, 2:4
-                                ]
-                            ),
-                            "block_z": (
-                                np.arange(
-                                    *caiman_dataset.motion_correction[
-                                        "coord_shifts_els"
-                                    ][b_id, 4:6]
-                                )
-                                if is3D
-                                else np.full_like(
-                                    np.arange(
-                                        *caiman_dataset.motion_correction[
-                                            "coord_shifts_els"
-                                        ][b_id, 0:2]
-                                    ),
-                                    0,
-                                )
-                            ),
-                            "x_shifts": caiman_dataset.motion_correction[
-                                "x_shifts_els"
-                            ][:, b_id],
-                            "y_shifts": caiman_dataset.motion_correction[
-                                "y_shifts_els"
-                            ][:, b_id],
-                            "z_shifts": (
-                                caiman_dataset.motion_correction["z_shifts_els"][
-                                    :, b_id
-                                ]
-                                if is3D
-                                else np.full_like(
-                                    caiman_dataset.motion_correction["x_shifts_els"][
-                                        :, b_id
-                                    ],
-                                    0,
-                                )
-                            ),
-                            "x_std": np.nanstd(
-                                caiman_dataset.motion_correction["x_shifts_els"][
-                                    :, b_id
-                                ]
-                            ),
-                            "y_std": np.nanstd(
-                                caiman_dataset.motion_correction["y_shifts_els"][
-                                    :, b_id
-                                ]
-                            ),
-                            "z_std": (
-                                np.nanstd(
-                                    caiman_dataset.motion_correction["z_shifts_els"][
-                                        :, b_id
-                                    ]
-                                )
-                                if is3D
-                                else np.nan
-                            ),
-                        }
-                    )
-
-                self.NonRigidMotionCorrection.insert1(nonrigid_correction)
-                self.Block.insert(nonrigid_blocks)
-
-            # -- summary images --
-            summary_images = [
-                {
-                    **key,
-                    **fkey,
-                    "ref_image": ref_image,
-                    "average_image": ave_img,
-                    "correlation_image": corr_img,
-                    "max_proj_image": max_img,
-                }
-                for fkey, ref_image, ave_img, corr_img, max_img in zip(
-                    field_keys,
-                    (
-                        caiman_dataset.motion_correction["reference_image"].transpose(
-                            2, 0, 1
-                        )
-                        if is3D
-                        else caiman_dataset.motion_correction["reference_image"][...][
-                            np.newaxis, ...
-                        ]
-                    ),
-                    (
-                        caiman_dataset.motion_correction["average_image"].transpose(
-                            2, 0, 1
-                        )
-                        if is3D
-                        else caiman_dataset.motion_correction["average_image"][...][
-                            np.newaxis, ...
-                        ]
-                    ),
-                    (
-                        caiman_dataset.motion_correction["correlation_image"].transpose(
-                            2, 0, 1
-                        )
-                        if is3D
-                        else caiman_dataset.motion_correction["correlation_image"][...][
-                            np.newaxis, ...
-                        ]
-                    ),
-                    (
-                        caiman_dataset.motion_correction["max_image"].transpose(2, 0, 1)
-                        if is3D
-                        else caiman_dataset.motion_correction["max_image"][...][
-                            np.newaxis, ...
-                        ]
-                    ),
-                )
-            ]
-            self.Summary.insert(summary_images)
         else:
             raise NotImplementedError("Unknown/unimplemented method: {}".format(method))
 
@@ -1270,7 +983,6 @@ class Segmentation(dj.Computed):
                 MaskClassification.MaskType.insert(
                     cells, ignore_extra_fields=True, allow_direct_insert=True
                 )
-        elif method == "caiman":
             caiman_dataset = imaging_dataset
 
             # infer "segmentation_channel" - from params if available, else from caiman loader
@@ -1321,7 +1033,6 @@ class Segmentation(dj.Computed):
                 MaskClassification.MaskType.insert(
                     cells, ignore_extra_fields=True, allow_direct_insert=True
                 )
-        elif method == "extract":
             extract_dataset = imaging_dataset
             masks = [
                 dict(
@@ -1475,44 +1186,6 @@ class Fluorescence(dj.Computed):
 
             self.insert1(key)
             self.Trace.insert(fluo_traces + fluo_chn2_traces)
-        elif method == "caiman":
-            caiman_dataset = imaging_dataset
-
-            # infer "segmentation_channel" - from params if available, else from caiman loader
-            params = (ProcessingParamSet * ProcessingTask & key).fetch1("params")
-            segmentation_channel = params.get(
-                "segmentation_channel", caiman_dataset.segmentation_channel
-            )
-
-            fluo_traces = []
-            for mask in caiman_dataset.masks:
-                fluo_traces.append(
-                    {
-                        **key,
-                        "mask": mask["mask_id"],
-                        "fluo_channel": segmentation_channel,
-                        "fluorescence": mask["inferred_trace"],
-                    }
-                )
-
-            self.insert1(key)
-            self.Trace.insert(fluo_traces)
-        elif method == "extract":
-            extract_dataset = imaging_dataset
-
-            fluo_traces = [
-                {
-                    **key,
-                    "mask": mask_id,
-                    "fluo_channel": 0,
-                    "fluorescence": fluorescence,
-                }
-                for mask_id, fluorescence in enumerate(extract_dataset.T)
-            ]
-
-            self.insert1(key)
-            self.Trace.insert(fluo_traces)
-
         else:
             raise NotImplementedError("Unknown/unimplemented method: {}".format(method))
 
@@ -1611,10 +1284,13 @@ class Activity(dj.Computed):
 
         fissa_params = (ActivityExtractionParamSet & key).fetch1("params")
 
+        task_mode, output_dir = (ProcessingTask & key).fetch1(
+            "task_mode", "processing_output_dir"
+        )
         # processing_output_dir contains the paramset_id. The upload & ingest should be done accordingly.
         output_dir = find_full_path(
             get_imaging_root_data_dir(),
-            (ProcessingTask & key).fetch("processing_output_dir", limit=1)[0],
+            output_dir,
         )
 
         reg_img_dir = output_dir / "suite2p/plane0/reg_tif"
@@ -1629,6 +1305,9 @@ class Activity(dj.Computed):
         if not any(
             (fissa_output_dir / p).exists() for p in ["separated.npy", "separated.npz"]
         ):
+            if fissa_params.get("task_mode", task_mode) == "load":
+                raise FileNotFoundError(f"No FISSA results found in {fissa_output_dir}")
+
             fissa_output_dir.mkdir(parents=True, exist_ok=True)
 
             Ly, Lx = (
@@ -1670,21 +1349,24 @@ class Activity(dj.Computed):
         # Old and new FISSA outputs are stored differently
         # Two versions can be distinguised with the output file suffix.
         # The new version infers non-zero traces; therefore no need for dff calculation.
+
+        info, mixmat, sep, results = fissa_output 
         trace_list = []
         if fissa_output_file.suffix == ".npy":
             for cell_id, result in zip(
-                cell_ids, fissa_output[3]
-            ):  # LuLab uses the 3rd component.
+                cell_ids, results
+            ):  
+                trace = result[0][0, :]  # take the 1st `signal` (always 1st `trial`)
                 trace_list.append(
                     dict(
                         **key,
                         mask=cell_id,
                         fluo_channel=0,
-                        activity_type="corrected_fluorescence",
-                        activity_trace=result[0][0][0],
+                        activity_type="f_corrected",
+                        activity_trace=trace,
                     )
                 )
-                dff = calculate_dff(result[0][0][0])
+                dff = calculate_dff(trace)
                 trace_list.append(
                     dict(
                         **key,
@@ -1712,7 +1394,7 @@ class Activity(dj.Computed):
                         **key,
                         mask=cell_id,
                         fluo_channel=0,
-                        activity_type="Fcorrected",
+                        activity_type="f_corrected",
                         activity_trace=trace,
                     )
                 )
