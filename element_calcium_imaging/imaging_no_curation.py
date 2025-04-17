@@ -1683,7 +1683,7 @@ class Activity(dj.Computed):
                         **key,
                         mask=cell_id,
                         fluo_channel=0,
-                        activity_type="corrected_fluorescence",
+                        activity_type="f_corrected",
                         activity_trace=trace,
                     )
                 )
@@ -1715,7 +1715,7 @@ class Activity(dj.Computed):
                         **key,
                         mask=cell_id,
                         fluo_channel=0,
-                        activity_type="Fcorrected",
+                        activity_type="f_corrected",
                         activity_trace=trace,
                     )
                 )
