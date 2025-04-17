@@ -1670,21 +1670,24 @@ class Activity(dj.Computed):
         # Old and new FISSA outputs are stored differently
         # Two versions can be distinguised with the output file suffix.
         # The new version infers non-zero traces; therefore no need for dff calculation.
+
+        info, mixmat, sep, results = fissa_output 
         trace_list = []
         if fissa_output_file.suffix == ".npy":
             for cell_id, result in zip(
-                cell_ids, fissa_output[3]
-            ):  # LuLab uses the 3rd component.
+                cell_ids, results
+            ):  
+                trace = result[0][0, :]  # take the 1st `signal` (always 1st `trial`)
                 trace_list.append(
                     dict(
                         **key,
                         mask=cell_id,
                         fluo_channel=0,
                         activity_type="corrected_fluorescence",
-                        activity_trace=result[0][0][0],
+                        activity_trace=trace,
                     )
                 )
-                dff = calculate_dff(result[0][0][0])
+                dff = calculate_dff(trace)
                 trace_list.append(
                     dict(
                         **key,
