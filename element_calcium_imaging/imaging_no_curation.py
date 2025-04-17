@@ -1284,10 +1284,13 @@ class Activity(dj.Computed):
 
         fissa_params = (ActivityExtractionParamSet & key).fetch1("params")
 
+        task_mode, output_dir = (ProcessingTask & key).fetch1(
+            "task_mode", "processing_output_dir"
+        )
         # processing_output_dir contains the paramset_id. The upload & ingest should be done accordingly.
         output_dir = find_full_path(
             get_imaging_root_data_dir(),
-            (ProcessingTask & key).fetch("processing_output_dir", limit=1)[0],
+            output_dir,
         )
 
         reg_img_dir = output_dir / "suite2p/plane0/reg_tif"
@@ -1302,6 +1305,9 @@ class Activity(dj.Computed):
         if not any(
             (fissa_output_dir / p).exists() for p in ["separated.npy", "separated.npz"]
         ):
+            if fissa_params.get("task_mode", task_mode) == "load":
+                raise FileNotFoundError(f"No FISSA results found in {fissa_output_dir}")
+
             fissa_output_dir.mkdir(parents=True, exist_ok=True)
 
             Ly, Lx = (
