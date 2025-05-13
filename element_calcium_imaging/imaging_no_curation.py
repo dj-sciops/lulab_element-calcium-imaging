@@ -1280,9 +1280,10 @@ class Activity(dj.Computed):
 
         import fissa
         from collections import Counter
-        from .utils import calculate_dff, calculate_zscore, combine_trials
+        from .utils import calculate_dff, calculate_zscore, detect_events, combine_trials
 
         fissa_params = (ActivityExtractionParamSet & key).fetch1("params")
+        sampling_rate = (scan.ScanInfo & key).fetch1("fps")
 
         task_mode, output_dir = (ProcessingTask & key).fetch1(
             "task_mode", "processing_output_dir"
@@ -1376,16 +1377,26 @@ class Activity(dj.Computed):
                         activity_trace=dff,
                     )
                 )
+                zscore = calculate_zscore(dff, sampling_rate)
                 trace_list.append(
                     dict(
                         **key,
                         mask=cell_id,
                         fluo_channel=0,
                         activity_type="z_score",
-                        activity_trace=calculate_zscore(dff),
+                        activity_trace=zscore,
                     )
                 )
-
+                ca_events = detect_events(dff, sampling_rate)
+                trace_list.append(
+                    dict(
+                        **key,
+                        mask=cell_id,
+                        fluo_channel=0,
+                        activity_type="ca_events",
+                        activity_trace=ca_events,
+                    )
+                )
         else:
             traces = combine_trials(fissa_output)
             for cell_id, trace in zip(cell_ids, traces):
